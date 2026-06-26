@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>皮克敏の森｜互動式隨機抽籤器</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for Whimsical Style -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Fredoka One', 'Noto Sans TC', sans-serif;
+            background: linear-gradient(185deg, #e0f2fe 0%, #f0fdf4 50%, #dcfce7 100%);
+            overflow-x: hidden;
+        }
+        /* Custom scrollbar for cute Pikmin feel */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f0fdf4;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #86efac;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4ade80;
+        }
+        /* Float Container Bounds */
+        #meadow-canvas {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: radial-gradient(circle, rgba(255,255,255,0.4) 0%, rgba(240,253,244,0.1) 100%);
+        }
+        /* Floating Cards */
+        .pikmin-card {
+            position: absolute !important;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.1s linear, box-shadow 0.2s ease, background-color 0.2s ease;
+            will-change: transform;
+            display: inline-flex !important;
+            align-items: center;
+            width: max-content !important; /* Force tight fit with text */
+            white-space: nowrap !important;
+        }
+        .pikmin-card:hover {
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            z-index: 50;
+        }
+        /* Glowing drawn state / Highlight state */
+        .card-glowing {
+            animation: pulse-glow 0.8s infinite alternate;
+            z-index: 100 !important;
+            border-color: #fbbf24 !important;
+            background-color: #fffbeb !important;
+        }
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 10px #facc15, 0 0 20px #facc15; transform: scale(1.1); }
+            100% { box-shadow: 0 0 25px #fde047, 0 0 40px #ef4444; transform: scale(1.25); }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Top Whimsical Header -->
+    <header class="relative z-40 bg-white/80 backdrop-blur-md border-b-4 border-emerald-200 py-3 px-6 flex flex-col md:flex-row justify-between items-center gap-3 shadow-sm shrink-0">
+        <div class="flex items-center gap-3">
+            <!-- Leaf SVG Icon -->
+            <span class="text-3xl">🌱</span>
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-emerald-800 flex items-center gap-2">
+                    皮克敏の森 <span class="text-sm font-normal bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full border border-emerald-300">互動抽籤器</span>
+                </h1>
+                <p class="text-xs text-emerald-600/80 hidden md:block">點擊任意飄浮的葉子紙片，或使用按鈕隨機挑選！</p>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-2 justify-center">
+            <button id="btn-draw-header" onclick="drawRandom()" class="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 disabled:pointer-events-none text-stone-900 font-bold px-4 py-2 rounded-full border-b-4 border-yellow-600 active:border-b-0 shadow-md transition-all text-sm flex items-center gap-1 z-50">
+                🎲 隨機抽一個
+            </button>
+            <button onclick="toggleSetupModal()" class="bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold px-4 py-2 rounded-full border-2 border-amber-300 shadow-md transition-all text-sm flex items-center gap-1 z-50">
+                📝 名單設定
+            </button>
+            <button onclick="resetAll()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-2 rounded-full border-b-4 border-emerald-700 active:border-b-0 shadow-md transition-all text-sm flex items-center gap-1 z-50">
+                🔄 重新洗牌
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+        
+        <!-- Left Side: Floating Meadow (The interactive draw area) -->
+        <section class="flex-1 relative h-full flex flex-col">
+            <!-- Stat Bar inside the meadow -->
+            <div class="absolute top-4 left-4 z-30 bg-white/90 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-md border border-emerald-100 flex items-center gap-4 text-sm text-emerald-900">
+                <span class="flex items-center gap-1"><span class="text-emerald-500">🟢</span> 漂浮中: <strong id="count-active" class="text-emerald-600 text-lg">0</strong></span>
+                <span class="text-emerald-300">|</span>
+                <span class="flex items-center gap-1"><span class="text-amber-500">🏆</span> 已抽中: <strong id="count-drawn" class="text-amber-600 text-lg">0</strong></span>
+            </div>
+
+            <!-- Empty State Warning if no names -->
+            <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 hidden z-10">
+                <div class="text-6xl mb-4 animate-bounce">🍂</div>
+                <h3 class="text-xl font-bold text-emerald-800 mb-2">森林空空如也...</h3>
+                <p class="text-emerald-600 mb-4 max-w-sm">請點擊上方「名單設定」輸入名單，讓皮克敏的名字葉片飛舞起來！</p>
+                <button onclick="toggleSetupModal()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2.5 rounded-full border-b-4 border-emerald-700 shadow-md">
+                    前往設定名單
+                </button>
+            </div>
+
+            <!-- The Meadow Canvas -->
+            <div id="meadow-canvas" class="flex-1">
+                <!-- Floating elements will be dynamically spawned here -->
+            </div>
+
+            <!-- Big Bottom Floating Draw Button (Perfect for touch screen & quick clicks) -->
+            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-xs px-4">
+                <button id="btn-draw-meadow" onclick="drawRandom()" class="w-full bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-500 hover:to-yellow-500 disabled:from-stone-300 disabled:to-stone-400 disabled:text-stone-500 disabled:border-stone-500 disabled:pointer-events-none text-stone-950 text-base md:text-lg font-black py-3 md:py-4 rounded-full border-b-4 border-amber-600 active:border-b-0 shadow-lg hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center gap-2">
+                    🐾 幫我抽一個！
+                </button>
+            </div>
+        </section>
+
+        <!-- Right Side: Drawn List Container (The Basket) -->
+        <section class="w-full lg:w-80 bg-stone-50 border-t-4 lg:border-t-0 lg:border-l-4 border-emerald-200 p-4 flex flex-col justify-between shrink-0 z-20 shadow-2xl">
+            <div>
+                <h2 class="text-lg font-bold text-stone-700 flex items-center gap-2 mb-3 border-b-2 border-stone-200 pb-2">
+                    🧺 皮克敏收集罐 <span id="basket-badge" class="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">0</span>
+                </h2>
+                <!-- Drawn Items List -->
+                <div id="drawn-container" class="space-y-2 overflow-y-auto max-h-[20vh] lg:max-h-[60vh] pr-1">
+                    <!-- Dynamic drawn items go here -->
+                    <div id="drawn-empty" class="text-center py-8 text-stone-400 text-sm italic">
+                        尚未抽出任何皮克敏...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action buttons in basket -->
+            <div class="mt-4 pt-3 border-t border-stone-200 flex gap-2">
+                <button onclick="exportResults()" class="flex-1 bg-white hover:bg-stone-100 text-stone-700 font-bold py-2 px-3 rounded-xl border border-stone-300 text-xs shadow-sm transition-all flex items-center justify-center gap-1">
+                    📋 複製中籤名單
+                </button>
+                <button onclick="putBackLast()" id="btn-putback" class="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-2 px-3 rounded-xl border border-rose-200 text-xs shadow-sm transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:pointer-events-none" disabled>
+                    ↩️ 撤銷上一步
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Custom Dialog: Setup Modal -->
+    <div id="setup-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-3xl border-4 border-emerald-300 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in duration-200">
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-r from-emerald-500 to-teal-500 p-5 text-white flex justify-between items-center">
+                <h3 class="text-xl font-bold flex items-center gap-2">🎒 編輯皮克敏清單</h3>
+                <button onclick="toggleSetupModal()" class="text-white hover:text-emerald-100 text-2xl font-bold">&times;</button>
+            </div>
+            <!-- Modal Body -->
+            <div class="p-6">
+                <label class="block text-emerald-800 font-bold mb-2 text-sm">請輸入要抽籤的名單 (一行一個名字)：</label>
+                <textarea id="names-input" class="w-full h-48 p-3 border-2 border-emerald-200 rounded-2xl focus:border-emerald-500 focus:outline-none font-sans text-stone-700 text-sm resize-none mb-4" placeholder="例如：&#10;Alice&#10;Bob&#10;Charlie&#10;小明&#10;小華"></textarea>
+                
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-xs text-stone-400">當前輸入：<strong id="input-count" class="text-emerald-600">0</strong> 個名字</span>
+                    <button onclick="loadSampleList()" class="text-xs text-emerald-600 hover:text-emerald-800 underline font-semibold">載入推薦範例名單</button>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="toggleSetupModal()" class="flex-1 bg-stone-100 hover:bg-stone-200 text-stone-600 font-bold py-3 rounded-2xl transition-all">
+                        取消
+                    </button>
+                    <button onclick="saveAndApplyNames()" class="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-2xl border-b-4 border-emerald-700 active:border-b-0 transition-all">
+                        套用並重新洗牌 ✨
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Celebration Zoom-In Overlay Modal -->
+    <div id="celebration-modal" class="fixed inset-0 bg-emerald-950/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 hidden pointer-events-auto">
+        <!-- Confetti Cannon Sim (CSS) -->
+        <div class="absolute inset-0 pointer-events-none overflow-hidden" id="confetti-holder"></div>
+        
+        <!-- Big Card Display -->
+        <div class="relative scale-95 animate-in zoom-in-75 duration-300 ease-out flex flex-col items-center">
+            
+            <div id="big-card-container" class="bg-white border-8 border-yellow-400 rounded-3xl p-8 md:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-sm w-80 md:w-96 relative">
+                <!-- Pikmin Stem Element on top -->
+                <div class="absolute -top-16 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                    <div class="w-2 h-16 bg-emerald-600 rounded-full"></div>
+                    <div id="big-card-flower" class="w-16 h-16 -mt-4 bg-white border-4 border-yellow-400 rounded-full shadow-lg flex items-center justify-center text-3xl">🌸</div>
+                </div>
+
+                <span class="text-amber-500 text-sm font-bold uppercase tracking-widest mt-4">Pikmin Picked!</span>
+                <h4 id="big-card-name" class="text-4xl md:text-5xl font-extrabold text-stone-800 my-6 break-words w-full">---</h4>
+                <p id="big-card-badge" class="bg-emerald-100 text-emerald-800 text-sm px-4 py-1 rounded-full font-bold">第 1 位抽中</p>
+            </div>
+
+            <!-- Cute pikmin dialogue bubble -->
+            <div class="mt-8 bg-emerald-100 text-emerald-900 px-6 py-3 rounded-2xl border-2 border-emerald-300 relative shadow-md">
+                <div class="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-emerald-100 rotate-45 border-t-2 border-l-2 border-emerald-300"></div>
+                <p class="text-sm font-bold">皮克敏幫您把這張葉子搬上來囉！🎉</p>
+            </div>
+
+            <!-- Close button -->
+            <button onclick="closeCelebration()" class="mt-8 bg-yellow-400 hover:bg-yellow-500 text-stone-900 font-black px-10 py-4 rounded-full border-b-4 border-yellow-600 active:border-b-0 shadow-lg text-lg tracking-wider transition-all">
+                繼續抽籤 🐾
+            </button>
+        </div>
+    </div>
+
+    <!-- Built-in simple Audio Context generator for retro games SFX -->
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'hover') {
+                // Short bubbly pluck when hovering
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'click') {
+                // Happy little Pikmin chirp
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.setValueAtTime(554.37, now + 0.05);
+                osc.frequency.setValueAtTime(659.25, now + 0.1);
+                osc.frequency.exponentialRampToValueAtTime(1200, now + 0.25);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.25);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            } else if (type === 'fanfare') {
+                // Major arpeggio when won!
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, index) => {
+                    const noteOsc = audioCtx.createOscillator();
+                    const noteGain = audioCtx.createGain();
+                    noteOsc.connect(noteGain);
+                    noteGain.connect(audioCtx.destination);
+                    noteOsc.type = 'sine';
+                    noteOsc.frequency.setValueAtTime(freq, now + index * 0.08);
+                    noteGain.gain.setValueAtTime(0.1, now + index * 0.08);
+                    noteGain.gain.exponentialRampToValueAtTime(0.01, now + index * 0.08 + 0.3);
+                    noteOsc.start(now + index * 0.08);
+                    noteOsc.stop(now + index * 0.08 + 0.35);
+                });
+            } else if (type === 'reset') {
+                // Retro sliding down sound
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+                gain.gain.setValueAtTime(0.08, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            }
+        }
+    </script>
+
+    <!-- App Logic & Game Engine -->
+    <script>
+        // Default fun Pikmin & classroom names for Fanny's quick-start
+        const DEFAULT_NAMES = [
+            "阿爾敏 (Armin)", "紅皮克敏 (Red)", "黃皮克敏 (Yellow)", "藍皮克敏 (Blue)", 
+            "羽翅皮克敏 (Winged)", "岩石皮克敏 (Rock)", "白皮克敏 (White)", "紫皮克敏 (Purple)", 
+            "冰凍皮克敏 (Ice)", "閃光皮克敏 (Glow)", "歐慶 (Oatchi)", "莫斯 (Moss)", 
+            "艾莉絲 (Alice)", "蔡老師 (Fanny)", "陳大同", "林小美"
+        ];
+
+        let activeNames = []; // Active floating names
+        let drawnNames = [];  // Record of drawn names
+        let cards = [];       // Array of card object states for drift engine
+        
+        const meadow = document.getElementById('meadow-canvas');
+        let requestId = null;
+
+        // Visual options for cards
+        const PIKMIN_THEMES = [
+            { bg: 'bg-red-50 border-red-300 text-red-800', badge: '🔴', stem: '🌱' },
+            { bg: 'bg-amber-50 border-amber-300 text-amber-800', badge: '🟡', stem: '🌸' },
+            { bg: 'bg-sky-50 border-sky-300 text-sky-800', badge: '🔵', stem: '🌹' },
+            { bg: 'bg-emerald-50 border-emerald-300 text-emerald-800', badge: '🟢', stem: '🌿' },
+            { bg: 'bg-purple-50 border-purple-300 text-purple-800', badge: '🟣', stem: '🍃' }
+        ];
+
+        // Init App
+        window.addEventListener('load', () => {
+            // Check if saved names exist
+            const saved = localStorage.getItem('pikmin_picker_names');
+            if (saved) {
+                activeNames = JSON.parse(saved);
+            } else {
+                activeNames = [...DEFAULT_NAMES];
+            }
+            document.getElementById('names-input').value = activeNames.join('\n');
+            updateInputCount();
+            resetAll();
+            startDrifting();
+        });
+
+        // Track live inputs
+        document.getElementById('names-input').addEventListener('input', updateInputCount);
+
+        function updateInputCount() {
+            const val = document.getElementById('names-input').value;
+            const count = val.split('\n').map(n => n.trim()).filter(n => n.length > 0).length;
+            document.getElementById('input-count').innerText = count;
+        }
+
+        function loadSampleList() {
+            document.getElementById('names-input').value = DEFAULT_NAMES.join('\n');
+            updateInputCount();
+        }
+
+        // Toggle Setup Modal
+        function toggleSetupModal() {
+            const modal = document.getElementById('setup-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        // Save customized list
+        function saveAndApplyNames() {
+            const text = document.getElementById('names-input').value;
+            const freshList = text.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+            
+            activeNames = freshList;
+            drawnNames = [];
+            localStorage.setItem('pikmin_picker_names', JSON.stringify(freshList));
+            
+            toggleSetupModal();
+            resetAll();
+        }
+
+        // Reset system state
+        function resetAll() {
+            playSound('reset');
+            // Clean active canvas
+            meadow.innerHTML = '';
+            cards = [];
+            
+            // Reload drawn list
+            drawnNames = [];
+            updateDrawnUI();
+
+            // Load all names back into active list
+            const saved = localStorage.getItem('pikmin_picker_names');
+            activeNames = saved ? JSON.parse(saved) : [...DEFAULT_NAMES];
+
+            if (activeNames.length === 0) {
+                document.getElementById('empty-state').classList.remove('hidden');
+            } else {
+                document.getElementById('empty-state').classList.add('hidden');
+                spawnCards();
+            }
+
+            // Enable draw buttons
+            setDrawButtonsDisabled(false);
+            updateCounters();
+        }
+
+        // Control draw buttons status
+        function setDrawButtonsDisabled(disabled) {
+            const btnHeader = document.getElementById('btn-draw-header');
+            const btnMeadow = document.getElementById('btn-draw-meadow');
+            if (btnHeader) btnHeader.disabled = disabled;
+            if (btnMeadow) btnMeadow.disabled = disabled;
+        }
+
+        // Spawn Card elements with Physics properties
+        function spawnCards() {
+            const rect = meadow.getBoundingClientRect();
+            const w = rect.width || window.innerWidth;
+            const h = rect.height || 400;
+
+            activeNames.forEach((name, index) => {
+                const theme = PIKMIN_THEMES[index % PIKMIN_THEMES.length];
+                
+                // Create DOM element
+                const el = document.createElement('div');
+                el.className = `pikmin-card px-4 py-2.5 rounded-full border-2 ${theme.bg} shadow-md flex items-center gap-1.5 font-bold whitespace-nowrap text-sm absolute select-none`;
+                
+                // Build HTML with stem on top
+                el.innerHTML = `
+                    <span class="absolute -top-3.5 left-1/2 -translate-x-1/2 text-xs select-none">${theme.stem}</span>
+                    <span class="text-xs select-none">${theme.badge}</span>
+                    <span>${name}</span>
+                `;
+
+                // Hover audio effect
+                el.addEventListener('mouseenter', () => playSound('hover'));
+
+                // Draw trigger on click
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // Avoid picking if button is locked or during drawing transition
+                    drawCard(name, el);
+                });
+
+                meadow.appendChild(el);
+
+                // Initial layout dimensions
+                const elRect = el.getBoundingClientRect();
+                const cardW = elRect.width || 120;
+                const cardH = elRect.height || 40;
+
+                // Physics state
+                const cardObj = {
+                    element: el,
+                    name: name,
+                    theme: theme,
+                    width: cardW,
+                    height: cardH,
+                    x: Math.random() * (w - cardW - 40) + 20,
+                    y: Math.random() * (h - cardH - 40) + 20,
+                    vx: (Math.random() - 0.5) * 1.5, // Natural slow float speeds
+                    vy: (Math.random() - 0.5) * 1.5,
+                    angle: (Math.random() - 0.5) * 15,
+                    targetAngle: (Math.random() - 0.5) * 15,
+                    angleTimer: Math.random() * 100
+                };
+
+                cards.push(cardObj);
+            });
+        }
+
+        // Drift Engine update loops
+        function startDrifting() {
+            if (requestId) cancelAnimationFrame(requestId);
+
+            function update() {
+                const rect = meadow.getBoundingClientRect();
+                const containerW = rect.width;
+                const containerY = rect.height;
+
+                // Physics update
+                cards.forEach(card => {
+                    // Update positions
+                    card.x += card.vx;
+                    card.y += card.vy;
+
+                    // Boundary collision (bounce)
+                    if (card.x <= 5) {
+                        card.x = 5;
+                        card.vx = Math.abs(card.vx) * 0.9;
+                    } else if (card.x + card.width >= containerW - 5) {
+                        card.x = containerW - card.width - 5;
+                        card.vx = -Math.abs(card.vx) * 0.9;
+                    }
+
+                    if (card.y <= 5) {
+                        card.y = 5;
+                        card.vy = Math.abs(card.vy) * 0.9;
+                    } else if (card.y + card.height >= containerY - 5) {
+                        card.y = containerY - card.height - 5;
+                        card.vy = -Math.abs(card.vy) * 0.9;
+                    }
+
+                    // Gentle sway angle simulation
+                    card.angleTimer -= 1;
+                    if (card.angleTimer <= 0) {
+                        card.targetAngle = (Math.random() - 0.5) * 20;
+                        card.angleTimer = Math.random() * 200 + 100;
+                    }
+                    card.angle += (card.targetAngle - card.angle) * 0.05;
+
+                    // Apply styles
+                    card.element.style.transform = `translate3d(${card.x}px, ${card.y}px, 0px) rotate(${card.angle}deg)`;
+                });
+
+                // Simple self-collision between cards to make them feel alive
+                for (let i = 0; i < cards.length; i++) {
+                    for (let j = i + 1; j < cards.length; j++) {
+                        const c1 = cards[i];
+                        const c2 = cards[j];
+
+                        // AABB overlap check with padding
+                        const pad = 10;
+                        if (c1.x < c2.x + c2.width + pad &&
+                            c1.x + c1.width + pad > c2.x &&
+                            c1.y < c2.y + c2.height + pad &&
+                            c1.y + c1.height + pad > c2.y) {
+                            
+                            // Gentle push away
+                            const dx = (c1.x + c1.width/2) - (c2.x + c2.width/2);
+                            const dy = (c1.y + c1.height/2) - (c2.y + c2.height/2);
+                            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+
+                            // Apply force
+                            c1.vx += (dx / dist) * 0.04;
+                            c1.vy += (dy / dist) * 0.04;
+                            c2.vx -= (dx / dist) * 0.04;
+                            c2.vy -= (dy / dist) * 0.04;
+
+                            // Speed limiter
+                            const maxS = 2;
+                            c1.vx = Math.max(-maxS, Math.min(maxS, c1.vx));
+                            c1.vy = Math.max(-maxS, Math.min(maxS, c1.vy));
+                            c2.vx = Math.max(-maxS, Math.min(maxS, c2.vx));
+                            c2.vy = Math.max(-maxS, Math.min(maxS, c2.vy));
+                        }
+                    }
+                }
+
+                requestId = requestAnimationFrame(update);
+            }
+
+            update();
+        }
+
+        // Random Draw Trigger with Highlights!
+        function drawRandom() {
+            if (cards.length === 0) {
+                alertToast("🍂 森林裡沒有漂浮的皮克敏囉！請先設定名單。");
+                return;
+            }
+
+            // Lock UI to prevent spams
+            setDrawButtonsDisabled(true);
+
+            // Select a random card
+            const randomIndex = Math.floor(Math.random() * cards.length);
+            const selectedCard = cards[randomIndex];
+            const el = selectedCard.element;
+
+            // Highlight chosen leaf in the meadow
+            el.classList.add('card-glowing');
+            playSound('click');
+
+            // Wait 400ms for dramatic focus glow, then trigger zoom-in draw
+            setTimeout(() => {
+                drawCard(selectedCard.name, el);
+                setDrawButtonsDisabled(false);
+            }, 600);
+        }
+
+        // Pick/Draw operation
+        function drawCard(name, element) {
+            // Check if card is already drawn (prevents rapid double-triggering)
+            if (!activeNames.includes(name)) return;
+
+            playSound('click');
+            
+            // Remove from float cards physics simulation
+            cards = cards.filter(c => c.name !== name);
+            activeNames = activeNames.filter(n => n !== name);
+
+            // Hide the actual canvas element
+            element.classList.remove('card-glowing');
+            element.classList.add('scale-150', 'opacity-0');
+            setTimeout(() => element.remove(), 250);
+
+            // Add to record list
+            drawnNames.push(name);
+            updateCounters();
+
+            // Trigger visual celebratory screen zoom-in
+            triggerCelebration(name, drawnNames.length);
+        }
+
+        // Show Big Banner
+        function triggerCelebration(name, rank) {
+            const bigCard = document.getElementById('big-card-container');
+            const bigName = document.getElementById('big-card-name');
+            const bigBadge = document.getElementById('big-card-badge');
+            const bigFlower = document.getElementById('big-card-flower');
+            
+            // Customize big visual based on index
+            const themeIndex = drawnNames.length % PIKMIN_THEMES.length;
+            const theme = PIKMIN_THEMES[themeIndex];
+
+            bigName.innerText = name;
+            bigBadge.innerText = `第 ${rank} 位被抽中`;
+            bigFlower.innerText = theme.stem;
+            
+            // Apply themed colors
+            bigCard.className = `bg-white border-8 ${theme.bg} rounded-3xl p-8 md:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-sm w-80 md:w-96 relative card-glowing`;
+
+            // Display
+            const modal = document.getElementById('celebration-modal');
+            modal.classList.remove('hidden');
+
+            // Sound
+            playSound('fanfare');
+
+            // Generate Confetti
+            createConfetti();
+        }
+
+        // Close Zoom-In celebration
+        function closeCelebration() {
+            const modal = document.getElementById('celebration-modal');
+            modal.classList.add('hidden');
+            document.getElementById('confetti-holder').innerHTML = '';
+
+            // Update Drawn UI list right after closing
+            updateDrawnUI();
+
+            // Check if no active ones left, cheer
+            if (activeNames.length === 0 && cards.length === 0) {
+                // All finished!
+                setTimeout(() => {
+                    const textNode = document.createElement('div');
+                    textNode.className = "text-center py-6 bg-emerald-500 text-white rounded-2xl font-bold animate-bounce my-4 mx-2";
+                    textNode.innerText = "🎉 森林裡所有的皮克敏都已被抽光囉！";
+                    document.getElementById('drawn-container').prepend(textNode);
+                }, 300);
+            }
+        }
+
+        // Render Right-side basket elements
+        function updateDrawnUI() {
+            const container = document.getElementById('drawn-container');
+            const emptyHint = document.getElementById('drawn-empty');
+            
+            // Clear existing non-templates
+            container.querySelectorAll('.drawn-card-item').forEach(e => e.remove());
+
+            if (drawnNames.length === 0) {
+                emptyHint.classList.remove('hidden');
+                document.getElementById('btn-putback').disabled = true;
+                return;
+            } else {
+                emptyHint.classList.add('hidden');
+                document.getElementById('btn-putback').disabled = false;
+            }
+
+            // Loop and add elements
+            drawnNames.forEach((name, index) => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'drawn-card-item bg-white border border-stone-200 hover:border-emerald-300 p-2.5 rounded-xl shadow-sm flex items-center justify-between transition-all';
+                
+                const themeIndex = index % PIKMIN_THEMES.length;
+                const theme = PIKMIN_THEMES[themeIndex];
+
+                itemEl.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="bg-stone-100 text-stone-500 text-xs w-6 h-6 flex items-center justify-center rounded-full font-bold">${index + 1}</span>
+                        <span class="text-xs">${theme.stem}</span>
+                        <span class="font-bold text-stone-700 text-sm">${name}</span>
+                    </div>
+                    <button onclick="individualPutBack('${name}')" class="text-stone-400 hover:text-rose-500 p-1 text-sm transition-colors" title="塞回漂浮草地">
+                        ↩️
+                    </button>
+                `;
+                // Add new drawn items at the top
+                container.prepend(itemEl);
+            });
+        }
+
+        // Undo last drawn item
+        function putBackLast() {
+            if (drawnNames.length === 0) return;
+            const last = drawnNames.pop();
+            activeNames.push(last);
+            
+            updateCounters();
+            updateDrawnUI();
+
+            // Relaunch it into canvas
+            meadow.innerHTML = '';
+            cards = [];
+            spawnCards();
+            playSound('reset');
+        }
+
+        // Individual rollback to active state
+        function individualPutBack(name) {
+            drawnNames = drawnNames.filter(n => n !== name);
+            activeNames.push(name);
+
+            updateCounters();
+            updateDrawnUI();
+
+            // Re-spawn canvas
+            meadow.innerHTML = '';
+            cards = [];
+            spawnCards();
+            playSound('reset');
+        }
+
+        // Export/Copy
+        function exportResults() {
+            if (drawnNames.length === 0) {
+                alertToast("罐子空空的，快去抽幾個皮克敏吧！");
+                return;
+            }
+            const copyText = drawnNames.map((n, i) => `${i+1}. ${n}`).join('\n');
+            
+            // Clipboard standard compatible method
+            const tempInput = document.createElement("textarea");
+            tempInput.value = copyText;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+
+            alertToast("📋 抽籤名單與順序已複製到剪貼簿囉！");
+        }
+
+        // Helper toast message (replacing native alert)
+        function alertToast(msg) {
+            const toast = document.createElement('div');
+            toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 bg-stone-800 text-white text-sm font-bold px-6 py-3 rounded-full shadow-2xl z-50 animate-bounce border border-stone-600';
+            toast.innerText = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2500);
+        }
+
+        // Update Stat counters
+        function updateCounters() {
+            document.getElementById('count-active').innerText = activeNames.length;
+            document.getElementById('count-drawn').innerText = drawnNames.length;
+            document.getElementById('basket-badge').innerText = drawnNames.length;
+        }
+
+        // Cute simple CSS Particle Confetti Generator
+        function createConfetti() {
+            const holder = document.getElementById('confetti-holder');
+            const colors = ['#f87171', '#fbbf24', '#60a5fa', '#34d399', '#c084fc', '#f472b6'];
+            
+            for (let i = 0; i < 50; i++) {
+                const conf = document.createElement('div');
+                conf.style.position = 'absolute';
+                conf.style.width = Math.random() * 12 + 6 + 'px';
+                conf.style.height = Math.random() * 12 + 6 + 'px';
+                conf.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                conf.style.borderRadius = Math.random() > 0.5 ? '50%' : '20%';
+                conf.style.left = Math.random() * 100 + 'vw';
+                conf.style.top = -20 + 'px';
+                conf.style.transform = `rotate(${Math.random() * 360}deg)`;
+                
+                // Animation properties
+                const fallDuration = Math.random() * 3 + 2;
+                const swingDuration = Math.random() * 2 + 1;
+                
+                conf.style.transition = `transform ${fallDuration}s linear, top ${fallDuration}s linear`;
+                
+                holder.appendChild(conf);
+
+                // Start animating frame
+                setTimeout(() => {
+                    conf.style.top = '105vh';
+                    conf.style.transform = `translate3d(${(Math.random() - 0.5) * 200}px, 0, 0) rotate(${Math.random() * 720}deg)`;
+                }, 50);
+            }
+        }
+    </script>
+</body>
+</html>
